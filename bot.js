@@ -305,7 +305,18 @@ async function startBot(sessionPath) {
                         const ownerName = loadOwnerCall(sessionName)
                         const {reason, time} = loadOfflineReason(sessionName)
                         await sock.sendMessage(from, {
-                            text: `${sapa} \n*Halo* @${senderId} \n\n> Saat ini ${ownerName} sedang offline. \n*Reason:* ${reason}. \n*Sejak:* ${time}. \nTinggalkan pesan di bawah ini. \n\nBot:*${asisten}*`,
+                            text: `────────────────────────────
+                        👋 ${sapa}, Halo *@${senderId}*
+                        
+                        👑 *${ownerName}* sedang *offline*.
+                        📝 Alasan: *${reason}*
+                        ⏱ Sejak: *${time}*
+                        
+                        Silakan tinggalkan pesan di bawah ini,
+                        nanti akan dibalas saat online.
+                        
+                        _📩 Balasan otomatis oleh asisten:_ *${asisten}*
+                        ────────────────────────────`,
                             mentions: [sender]
                         })
                     }
@@ -321,7 +332,18 @@ async function startBot(sessionPath) {
                     const {reason, time} = loadOfflineReason(sessionName)
 
                     await sock.sendMessage(from, {
-                        text: `${sapa}, \n\n> Saat ini ${ownerName} sedang offline. \nReason: ${reason}. \nSejak: ${time} \nTinggalkan pesan dibawah ini. \n\nBot: *${asisten}*`
+                        text: `────────────────────────────
+                    ${sapa}! Terima kasih sudah menghubungi bot.
+                    
+                    Mohon maaf, saat ini 👑 *${ownerName}* sedang *offline*.
+                    📝 Alasan: *${reason}*
+                    ⏱ Sejak: *${time}*
+                    
+                    Silakan tinggalkan pesanmu,
+                    nanti akan dibalas segera setelah online.
+                    
+                    _🤖 Asisten:_ *${asisten}*
+                    ────────────────────────────`
                     })
                 }
             }
@@ -369,3 +391,4 @@ app.get("/qr", (req, res) => {
 app.listen(PORT, () => console.log(`🚀 Panel Express berjalan di http://localhost:${PORT}`))
 
 loadAllSessions()
+
