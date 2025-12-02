@@ -305,18 +305,7 @@ async function startBot(sessionPath) {
                         const ownerName = loadOwnerCall(sessionName)
                         const {reason, time} = loadOfflineReason(sessionName)
                         await sock.sendMessage(from, {
-                            text: `────────────────────────────
-                        👋 ${sapa}, Halo *@${senderId}*
-                        
-                        👑 *${ownerName}* sedang *offline*.
-                        📝 Alasan: *${reason}*
-                        ⏱ Sejak: *${time}*
-                        
-                        Silakan tinggalkan pesan di bawah ini,
-                        nanti akan dibalas saat online.
-                        
-                        _📩 Balasan otomatis oleh asisten:_ *${asisten}*
-                        ────────────────────────────`,
+                            text: "──────────────────────────── \n👋 ${sapa}, Halo *@${senderId}* \n\n👑 *${ownerName}* sedang *offline* sekarang. \n📝 Alasan: *${reason}* \n⏱ Sejak: *${time}* \n\nSilakan tinggalkan pesan di bawah ini, \nnanti akan dibalas saat online kembali. \n\n_📩 Balasan otomatis oleh asisten:_ *${asisten}* \n────────────────────────────",
                             mentions: [sender]
                         })
                     }
@@ -332,18 +321,7 @@ async function startBot(sessionPath) {
                     const {reason, time} = loadOfflineReason(sessionName)
 
                     await sock.sendMessage(from, {
-                        text: `────────────────────────────
-                    ${sapa}! Terima kasih sudah menghubungi bot.
-                    
-                    Mohon maaf, saat ini 👑 *${ownerName}* sedang *offline*.
-                    📝 Alasan: *${reason}*
-                    ⏱ Sejak: *${time}*
-                    
-                    Silakan tinggalkan pesanmu,
-                    nanti akan dibalas segera setelah online.
-                    
-                    _🤖 Asisten:_ *${asisten}*
-                    ────────────────────────────`
+                        text: "──────────────────────────── \n${sapa}! Terima kasih sudah menghubungi bot. \n\nMohon maaf, saat ini 👑 *${ownerName}* sedang *offline*. \n📝 Alasan: *${reason}* \n⏱ Sejak: *${time}* \n\nSilakan tinggalkan pesanmu, \nnanti akan dibalas segera setelah online. \n\n_🤖 Asisten:_ *${asisten}* \n────────────────────────────"
                     })
                 }
             }
@@ -391,4 +369,5 @@ app.get("/qr", (req, res) => {
 app.listen(PORT, () => console.log(`🚀 Panel Express berjalan di http://localhost:${PORT}`))
 
 loadAllSessions()
+
 
