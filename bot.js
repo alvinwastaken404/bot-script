@@ -292,9 +292,8 @@ async function startBot(sessionPath) {
 
                 const isTagged = mentionJid.some(jid => jid.split('@')[0] === botNumber)
                 const isNameMentioned = pesan.includes(botNumber)
-                const isReplyToBot = quotedSender && quotedSender.split('@')[0].includes(botNumber)
 
-                if (isTagged || isNameMentioned || isReplyToBot) {
+                if (isTagged || isNameMentioned) {
                     const now = Date.now()
                     const key = `${from}:${senderId}`
                     const last = sessionCooldown.get(key) || 0
@@ -369,5 +368,6 @@ app.get("/qr", (req, res) => {
 app.listen(PORT, () => console.log(`🚀 Panel Express berjalan di http://localhost:${PORT}`))
 
 loadAllSessions()
+
 
 
