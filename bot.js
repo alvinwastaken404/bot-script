@@ -1,373 +1,528 @@
+const { Client, LocalAuth } = require('whatsapp-web.js')
+const express = require('express')
+const QRCode = require('qrcode')
+const waVersion = require('@wppconnect/wa-version')
 const fs = require('fs')
 const path = require('path')
-const express = require('express')
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
-const { Boom } = require('@hapi/boom')
-const QRCode = require('qrcode')
-const { flushCompileCache } = require('module')
-
-const replyCooldown = new Map()
-const botStatus = new Map()
-const offlineMode = new Map()
-const statusFile = path.join(__dirname, 'status.json')
-
-let latestQR = ""
-let isConnected = false
-
-function isUserOffline(sessionName) {
-    return offlineMode.get(sessionName) ?? true
-}
-
-function getSapaan() {
-    const now = new Date()
-    const jam = now.getHours()
-    if (jam >= 4 && jam < 11) return "*Selamat pagi*"
-    if (jam >= 11 && jam < 15) return "*Selamat siang*"
-    if (jam >= 15 && jam < 18) return "*Selamat sore*"
-    return "*Selamat malam*"
-}
-
-function loadStatus() {
-    if (!fs.existsSync(statusFile)) {
-        fs.writeFileSync(statusFile, '{}')
-    }
-    return JSON.parse(fs.readFileSync(statusFile))
-}
-
-function saveStatus(statusObj) {
-    fs.writeFileSync(statusFile, JSON.stringify(statusObj, null, 2))
-}
-
-function getBotStatus(sessionName) {
-    const status = loadStatus()
-    return status[sessionName] ?? true
-}
-
-function setBotStatus(sessionName, isOnline) {
-    const status = loadStatus()
-    status[sessionName] = isOnline
-    saveStatus(status)
-}
-
-function getDefaultAssistantFile(sessionName) {
-    return path.join('id', sessionName, 'defaultAssistant.json')
-}
-
-function loadDefaultAssistant(sessionName) {
-    const filePath = getDefaultAssistantFile(sessionName)
-    if (fs.existsSync(filePath)) {
-        const raw = fs.readFileSync(filePath, 'utf-8')
-        try {
-            const data = JSON.parse(raw)
-            return data.assistant || 'Bot'
-        } catch (err) {
-            console.error(`❌ Error parsing defaultAssistant.json:`, err)
-            return 'Bot'
-        }
-    }
-    return 'Bot'
-}
-
-function getOwnerCall(sessionName) {
-    return path.join('id', sessionName, 'owner.json')
-}
-
-function loadOwnerCall(sessionName) {
-    const filePath = getOwnerCall(sessionName)
-    if (fs.existsSync(filePath)) {
-        try {
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-            const gender = (data.gender || '').toLowerCase()
-            const name = data.owner || 'Pemilik'
-            const panggilan = gender === 'female' ? 'Mbak' : 'Mas'
-            return `${panggilan} ${name}`
-        } catch (err) {
-            console.error('❌ Gagal ambil sapaan owner:', err)
-            return 'Pemilik'
-        }
-    }
-    return 'Pemilik'
-}
-
-function saveOwnerCall(sessionName, name, gender) {
-    const filePath = getOwnerCall(sessionName)
-    const dirPath = path.dirname(filePath)
-
-    if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true })
-    }
-
-    let data = {}
-    if (fs.existsSync(filePath)) {
-        try {
-            data = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-        } catch (err) {
-            console.error('❌ Gagal baca owner.json:', err)
-        }
-    }
-
-    data.owner = name
-    if (gender === 'male' || gender === 'female') {
-        data.gender = gender
-    }
-
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
-}
-
-function saveDefaultAssistant(sessionName, name) {
-    const filePath = getDefaultAssistantFile(sessionName)
-    const jsonData = { assistant: name }
-    fs.writeFileSync(filePath, JSON.stringify(jsonData, null, 2))
-}
-
-function getReasonFile(sessionName) {
-    return path.join('id', sessionName, 'offlineReason.json')
-}
-
-function saveOfflineReason(sessionName, reason) {
-    const filePath = getReasonFile(sessionName)
-    const dirPath = path.dirname(filePath)
-
-    if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true })
-    }
-
-    const now = new Date()
-    const formattedTime = now.toLocaleString('id-ID', {
-        dateStyle: 'full',
-        timeStyle: 'medium'
-    })
-
-    const data = {
-        reason,
-        time: formattedTime
-    }
-
-    fs.writeFileSync(filePath, JSON.stringify({ reason }, null, 2))
-}
-
-function loadOfflineReason(sessionName) {
-    const filePath = getReasonFile(sessionName)
-    if (fs.existsSync(filePath)) {
-        try {
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-            return {
-                reason: data.reason || "Owner sedang offline.",
-                time: data.time || "Waktu tidak tersedia."
-            }
-        } catch (err) {
-            return {
-                reason: "Owner sedang offline.",
-                time: "Waktu tidak tersedia."
-            }
-        }
-    }
-    return {
-        reason: "Owner sedang offline.",
-        time: "Waktu tidak tersedia."
-    }
-}
-
-// ===================================== BOT =====================================
-
-async function startBot(sessionPath) {
-    const sessionName = path.basename(sessionPath)
-    offlineMode.set(sessionName, !getBotStatus(sessionName))
-    let defaultAssistant = loadDefaultAssistant(sessionName)
-
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath)
-    const sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: false
-    })
-
-    if (!replyCooldown.has(sessionName)) replyCooldown.set(sessionName, new Map())
-
-    sock.ev.on('creds.update', saveCreds)
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update
-
-        if (qr) {
-            console.log("📲 QR tersedia, buka /qr di browser untuk scan")
-            latestQR = await QRCode.toDataURL(qr)
-            isConnected = false
-        }
-
-        if (connection === 'open') {
-            console.log(`✅ Bot ${sessionName} terhubung ke WhatsApp!`)
-            latestQR = ""
-            isConnected = true
-            botStatus.set(sessionName, '🟢 Online')
-        } else if (connection === 'close') {
-            const reason = (lastDisconnect?.error)?.output?.statusCode
-            console.log(`❌ Bot ${sessionName} disconnected. Reason:`, reason)
-            botStatus.set(sessionName, '🔴 Offline')
-
-            if (reason !== DisconnectReason.loggedOut) startBot(sessionPath)
-        }
-    })
-
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        try {
-            if (type !== 'notify') return
-            const msg = messages[0]
-            if (!msg.message) return
-
-            const sessionCooldown = replyCooldown.get(sessionName)
-            const from = msg.key.remoteJid
-            const isGroup = from.endsWith('@g.us')
-            const sender = msg.key.participant || msg.key.remoteJid
-            const senderId = sender.split('@')[0]
-            const pesan = msg.message?.conversation || msg.message?.extendedTextMessage?.text || ''
-            const isFromMe = msg.key.fromMe
-            const asisten = defaultAssistant
-
-            if (pesan.toLowerCase() === '!ping') {
-                await sock.sendMessage(from, { text: `*Pong!*` })
-            }
-
-            if (pesan === '!status') {
-                const allStatus = Array.from(botStatus.entries()).map(([name, status]) => `• *${name}*: ${status}`).join('\n')
-                await sock.sendMessage(from, { text: `📊 *Status semua akun:* \n${allStatus}` })
-                return
-            }
-
-            if (pesan.startsWith('!off ')) {
-                const reason = pesan.slice(5).trim()
-
-                offlineMode.set(sessionName, true)
-                setBotStatus(sessionName, false)
-
-                if (reason) saveOfflineReason(sessionName, reason)
-                
-                await sock.sendMessage(from, { 
-                    text: `🤖 Mode offline diaktifkan.${
-                        reason ? `\n📝 Alasan: *${reason}*` : ''
-                    }\n⏱ Waktu: *${new Date().toLocaleString('id-ID')}*`
-                })
-                return
-            }
-
-            if (pesan === '!on') {
-                offlineMode.set(sessionName, false)
-                setBotStatus(sessionName, true)
-                await sock.sendMessage(from, { text: '🤖 Mode online diaktifkan.' })
-            }
-
-            if (pesan.startsWith('!defaultasisten ')) {
-                const namaDefault = pesan.slice(16).trim()
-                if (namaDefault) {
-                    defaultAssistant = namaDefault
-                    saveDefaultAssistant(sessionName, defaultAssistant)
-                    await sock.sendMessage(from, { text: `✅ Default asisten sekarang: *${defaultAssistant}*` })
-                }
-                return
-            }
-
-            if (pesan.startsWith('!setowner ')) {
-                const args = pesan.slice(10).trim().split('|')
-                const namaOwner = args[0]?.trim()
-                const gender = args[1]?.trim().toLowerCase()
-
-                if (!namaOwner) {
-                    await sock.sendMessage(from, { text: `⚠️ Format salah.\nContoh: *!setowner <nama> | <male/female>*` })
-                    return
-                }
-
-                saveOwnerCall(sessionName, namaOwner, gender)
-                await sock.sendMessage(from, { text: `👑 Owner diset ke: *${namaOwner}* ${gender ? `(gender: ${gender})` : ''}` })
-                return
-            }
-
-            if (!isUserOffline(sessionName)) return
-            if (isFromMe) return
-
-            if (isGroup) {
-                const contextInfo = msg.message?.extendedTextMessage?.contextInfo || {}
-                const mentionJid = contextInfo.mentionedJid || []
-                const quotedSender = contextInfo.participant
-                const botJid = sock.user.id
-                const botNumber = botJid.split('@')[0].split(':')[0]
-
-                const isTagged = mentionJid.some(jid => jid.split('@')[0] === botNumber)
-                const isNameMentioned = pesan.includes(botNumber)
-
-                if (isTagged || isNameMentioned) {
-                    const now = Date.now()
-                    const key = `${from}:${senderId}`
-                    const last = sessionCooldown.get(key) || 0
-
-                    if (now - last >= 300000) {
-                        sessionCooldown.set(key, now)
-                        const sapa = getSapaan()
-                        const ownerName = loadOwnerCall(sessionName)
-                        const {reason, time} = loadOfflineReason(sessionName)
-                        await sock.sendMessage(from, {
-                            text: "──────────────────────────── \n👋 ${sapa}, Halo *@${senderId}* \n\n👑 *${ownerName}* sedang *offline* sekarang. \n📝 Alasan: *${reason}* \n⏱ Sejak: *${time}* \n\nSilakan tinggalkan pesan di bawah ini, \nnanti akan dibalas saat online kembali. \n\n_📩 Balasan otomatis oleh asisten:_ *${asisten}* \n────────────────────────────",
-                            mentions: [sender]
-                        })
-                    }
-                }
-            } else {
-                const now = Date.now()
-                const last = sessionCooldown.get(from) || 0
-
-                if (now - last >= 300000) {
-                    sessionCooldown.set(from, now)
-                    const sapa = getSapaan()
-                    const ownerName = loadOwnerCall(sessionName)
-                    const {reason, time} = loadOfflineReason(sessionName)
-
-                    await sock.sendMessage(from, {
-                        text: "──────────────────────────── \n${sapa}! Terima kasih sudah menghubungi bot. \n\nMohon maaf, saat ini 👑 *${ownerName}* sedang *offline*. \n📝 Alasan: *${reason}* \n⏱ Sejak: *${time}* \n\nSilakan tinggalkan pesanmu, \nnanti akan dibalas segera setelah online. \n\n_🤖 Asisten:_ *${asisten}* \n────────────────────────────"
-                    })
-                }
-            }
-        } catch (err) {
-            console.error('❌ Gagal proses pesan:', err)
-        }
-    })
-}
-
-async function loadAllSessions() {
-    const basePath = 'sessions/'
-    const sessionFolders = fs.readdirSync(basePath)
-        .filter(name => name.startsWith('auth_info_') && fs.statSync(path.join(basePath, name)).isDirectory())
-
-    for (const folder of sessionFolders) {
-        const sessionPath = path.join(basePath, folder)
-        startBot(sessionPath)
-    }
-}
+const { exec } = require('child_process')
+const YTMusic = require('ytmusic-api')
 
 const app = express()
 const PORT = 3000
 
-app.get("/", (req, res) => {
-    res.send(`
-        <h2>WhatsApp Bot Panel</h2>
-        <p>Status: ${isConnected ? "🟢 Connected" : "🔴 Waiting for QR"}</p>
-        <a href="/qr"><button>Lihat QR Code</button></a>
-    `)
+let qrCodeData = null
+
+const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    },
+    webVersionCache: {
+        type: 'remote',
+        remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${waVersion.getLatestVersion()}.html`
+    }
 })
 
-app.get("/qr", (req, res) => {
-    if (!latestQR) {
-        return res.send(`<h3>Bot sudah login ✔</h3><br><a href="/">Kembali</a>`)
+const ytmusic = new YTMusic()
+
+client.on('qr', async (qr) => {
+    console.log('📱 QR Received, open ur browser')
+    qrCodeData = await QRCode.toDataURL(qr)
+})
+
+client.on('ready', () => {
+    console.log('✅ Bot siap!')
+    qrCodeData = null
+})
+client.on('authenticated', () => console.log('✅ Login berhasil!'))
+client.on('auth_failure', msg => console.error('❌ Auth gagal:', msg))
+client.on('disconnected', reason => console.log('⚠️ Disconnect:', reason))
+
+app.get('/', (req, res) => {
+    if (qrCodeData) {
+        res.send(`
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>WhatsApp Bot</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
     }
 
-    res.send(`
-        <h2>Scan QR WhatsApp untuk Login</h2>
-        <img src="${latestQR}" />
-        <br><br>
-        <a href="/">Kembali</a>
-    `)
+    .container {
+        text-align: center;
+        background: #1e293b;
+        padding: 30px;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+
+    h2 {
+        margin-bottom: 20px;
+    }
+
+    img {
+        width: 250px;
+        border-radius: 12px;
+        background: white;
+        padding: 10px;
+    }
+
+    .status {
+        margin-top: 15px;
+        font-size: 14px;
+        opacity: 0.7;
+    }
+</style>
+</head>
+<body>
+
+<div class="container">
+    ${
+        qrCodeData
+        ? `
+            <h2>📱 Scan QR WhatsApp</h2>
+            <img src="${qrCodeData}" />
+            <div class="status">Scan pakai WhatsApp kamu</div>
+        `
+        : `
+            <h2>✅ Bot sudah login</h2>
+            <div class="status">Silakan gunakan bot di WhatsApp</div>
+        `
+    }
+</div>
+
+</body>
+</html>
+        `)
+    } else { 
+        res.send(`
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>WhatsApp Bot</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+
+    .container {
+        text-align: center;
+        background: #1e293b;
+        padding: 30px;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+
+    h2 {
+        margin-bottom: 10px;
+    }
+
+    .status {
+        margin-top: 10px;
+        font-size: 14px;
+        opacity: 0.7;
+    }
+
+    .check {
+        font-size: 50px;
+        margin-bottom: 10px;
+    }
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="check">✅</div>
+    <h2>Bot sudah login</h2>
+    <div class="status">Silakan gunakan bot di WhatsApp</div>
+</div>
+
+</body>
+</html>
+        `)
+    }
 })
 
-app.listen(PORT, () => console.log(`🚀 Panel Express berjalan di http://localhost:${PORT}`))
+app.listen(PORT, () => {
+    console.log(`🌐 http://localhost:${PORT}`)
+})
 
-loadAllSessions()
+let cooldownDB = {
+    chat: {},
+    command: {}
+}
+if (fs.existsSync('./cooldown.json')) {
+    cooldownDB = JSON.parse(fs.readFileSync('./cooldown.json'))
+}
+function saveCooldown() {
+    fs.writeFileSync('./cooldown.json', JSON.stringify(cooldownDB, null, 2))
+}
+function isOnCooldown(type, user, duration) {
+    const now = Date.now()
+    const last = cooldownDB[type][user]
+
+    if (!last) return false
+
+    return (now - last) < duration
+}
+function setCooldown(type, user) {
+    cooldownDB[type][user] = Date.now()
+    saveCooldown()
+}
+function cleanupCooldown() {
+    const now = Date.now()
+
+    for (const type in cooldownDB) {
+        for (const user in cooldownDB[type]) {
+            const limit = type === 'command' ? COMMAND_COOLDOWN : CHAT_COOLDOWN
+
+            if (now - cooldownDB[type][user] > limit) {
+                delete cooldownDB[type][user]
+            }
+        }
+    }
+
+    saveCooldown()
+}
+setInterval(cleanupCooldown, 5 * 60 * 1000)
+
+const CHAT_COOLDOWN = 8 * 60 * 1000
+const COMMAND_COOLDOWN =  0.75 * 60 * 1000
+const prefix = '!'
+
+const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour >= 4 && hour < 10) return "Selamat pagi 🌅"
+    if (hour >= 10 && hour < 15) return "Selamat siang ☀️"
+    if (hour >= 15 && hour < 18) return "Selamat sore 🌇"
+    return "Selamat malam 🌙"
+}
+
+async function startBot() {
+    await ytmusic.initialize()
+    console.log('🎵 YTMusic siap!')
+
+    // main handler
+    async function handleMessage(msg) {
+        try {
+            if (msg.from === 'status@broadcast') return
+            if (!msg.body || typeof msg.body !== 'string') return
+
+            const text = msg.body || ''
+
+            if (msg.fromMe && !text.startsWith(prefix)) return
+
+            const now = Date.now()
+            const isGroup = msg.from.endsWith('@g.us')
+            const sender = msg.author || msg.from
+            const isCommand = text.startsWith(prefix)
+
+            if (msg.fromMe && msg.id.fromMe === false) return
+
+            if (isCommand) {
+                const args = text.slice(1).trim().split(/ +/)
+                const command = args.shift().toLowerCase()
+
+                let isAdmin = false
+
+                if (isGroup) {
+                    const chat = await msg.getChat()
+
+                    if (chat.isGroup) {
+                        const author = msg.author || msg.from
+                        const participant = chat.participants.find(p => p.id._serialized === author)
+
+                        isAdmin = participant?.isAdmin || participant?.isSuperAdmin
+                    }
+                }
+
+                const isOwner = msg.fromMe
+                if (!isOwner && !isAdmin) {
+                    if (isOnCooldown('command', command, COMMAND_COOLDOWN)) return
+                    setCooldown('command', command)
+                }
+
+                // menu bot
+                if (command === 'help') {
+                    msg.reply(`Halo 👋
+Ini fitur yang bisa dipakai:
+
+• !play <judul>
+• !download <link>
+• !sticker
+
+simple aja, tinggal pakai 👍`)
+                }
+
+                // cmd play
+                if (command === 'play') {
+                    const query = args.join(' ')
+                    if (!query) return msg.reply('Contoh: ```!play judul lagu```')
+
+                    const results = await ytmusic.searchSongs(query)
+                    const song = results[0]
+
+                    if (!song) return msg.reply('❌ Lagu tidak ditemukan')
+
+                    function formatDuration(sec) {
+                        if (typeof sec === 'string') return sec
+
+                        const minutes = Math.floor(sec / 60)
+                        const seconds = sec % 60
+
+                        return `${minutes}:${seconds.toString().padStart(2, '0')}`
+                    }
+
+                    const title = song.name
+                    const artist = song.artist?.name || 'Unknown'
+                    const duration = song.duration
+                        ? formatDuration(song.duration)
+                        : 'Unknown'
+                    const videoUrl = `https://www.youtube.com/watch?v=${song.videoId}`
+
+                    await msg.reply(`🎶 *NOW PLAYING*
+
+📌 *Title*      : ${title}
+👤 *Artist*     : ${artist}
+⏱️ *Duration*   : ${duration}
+`)
+
+                    const filePath = path.join(__dirname, `${Date.now()}.mp3`)
+                    const cmd = `yt-dlp -x --audio-format mp3 -o "${filePath}" "${videoUrl}"`
+
+                    exec(cmd, async (err) => {
+                        if (err) {
+                            console.error(err)
+
+                            const fallback = `python -m yt_dlp -x --audio-format mp3 -o "${filePath}" "${videoUrl}"`
+
+                            exec(fallback, async (err2) => {
+                                if (err2) {
+                                    console.error(err2)
+                                    return msg.reply('❌ Gagal download audio')
+                                }
+                                setTimeout(sendAudio, 1500)
+                            })
+                            return
+                        }
+
+                        setTimeout(sendAudio, 1500)
+                    })
+
+                    const { MessageMedia } = require('whatsapp-web.js')
+                    async function sendAudio() {
+                        try {
+                            if (!fs.existsSync(filePath)) {
+                                return msg.reply('❌ File audio tidak ditemukan')
+                            }
+
+                            const media = MessageMedia.fromFilePath(filePath)
+                            const chatId = msg.fromMe ? msg.to : msg.from
+
+                            await msg.reply(media, undefined, {
+                                sendAudioAsVoice: false,
+                                mimetype: 'audio/mpeg'
+                            })
+
+                            console.log('✅ Audio terkirim')
+                        } catch (e) {
+                            console.error(e)
+                            msg.reply('❌ Gagal kirim audio')
+                        } finally {
+                            if (fs.existsSync(filePath)) {
+                                fs.unlinkSync(filePath)
+                                console.log('🗑️ File dihapus')
+                            }
+                        }
+                    }
+                }
+
+                // cmd stiker
+                if (command === 'sticker') {
+                    let mediaMsg = msg
+                    if (msg.hasQuotedMsg) {
+                        mediaMsg = await msg.getQuotedMessage()
+                    }
+                    if (!mediaMsg.hasMedia) {
+                        return msg.reply('Reply / kirim gambarmu dengan ```!sticker```')
+                    }
+
+                    try {
+                        const media = await mediaMsg.downloadMedia()
+
+                        if (!media) {
+                            return msg.reply('❌ Gagal download media')
+                        }
+                        await msg.reply(media, undefined, {
+                            sendMediaAsSticker: true
+                        })
+                    } catch (err) {
+                        console.error(err)
+                        msg.reply('❌ Gagal membuat sticker')
+                    }
+                }
+
+                // cmd download konten
+                if (command === 'download') {
+                    const url = args[0]
+
+                    if (!url) {
+                        return msg.reply('Contoh: ```!download <link>```')
+                    }
+
+                    await msg.reply('⏳ Sedang download...')
+
+                    const fileId = Date.now()
+                    const output = path.join(__dirname, `${fileId}.%(ext)s`)
+
+                    const cmd = `yt-dlp -f "mp4/best" -o "${output}" "${url}"`
+
+                    exec(cmd, async (err) => {
+                        if (err) {
+                            console.error(err)
+                            return msg.reply('❌ Gagal download konten')
+                        }
+
+                        try {
+                            const files = fs.readdirSync(__dirname)
+                            const fileName = files.find(f => f.startsWith(fileId.toString()))
+
+                            if (!fileName) {
+                                return msg.reply('❌ File tidak ditemukan')
+                            }
+
+                            const fullPath = path.join(__dirname, fileName)
+
+                            await new Promise(r => setTimeout(r, 1000))
+
+                            const stats = fs.statSync(fullPath)
+
+                            if (stats.size > 16 * 1024 * 1024) {
+                                fs.unlinkSync(fullPath)
+                                return msg.reply('❌ File terlalu besar (max ±16MB)')
+                            }
+
+                            const { MessageMedia } = require('whatsapp-web.js')
+                            const media = MessageMedia.fromFilePath(fullPath)
+
+                            await msg.reply(media, undefined, {
+                                caption: '🎬 Berhasil di-download'
+                            })
+
+                            console.log('✅ Video terkirim')
+
+                            if (fs.existsSync(fullPath)) {
+                                fs.unlinkSync(fullPath)
+                                console.log('🗑️ File dihapus')
+                            }
+
+                        } catch (e) {
+                            console.error(e)
+                            msg.reply('❌ Gagal kirim media')
+                        }
+                    })
+                }
+                return
+            }
+
+            // auto-reply private
+            if (!isCommand && !isGroup && !msg.fromMe) {
+                if (isOnCooldown('chat', sender, CHAT_COOLDOWN)) return
+                setCooldown('chat', sender)
+
+                await msg.reply(`Halo ${getGreeting()}! \n\nTulis pesanmu dibawah ya...😊`)
+            }
+
+        } catch (err) {
+            console.error('❌ Error:', err)
+        }
+    }
+
+    client.on('message', handleMessage)
+    client.on('message_create', handleMessage)
+
+    client.on('group_join', async (notification) => {
+        try {
+            const chat = await notification.getChat();
+            if (!chat.isGroup) return;
+
+            // 🔒 cek apakah bot admin
+            const me = chat.participants.find(p => p.isMe);
+            if (!me || !me.isAdmin) return;
+
+            const user = notification.id.participant || notification.id.remote;
+            if (!user) return;
+            if (user === client.info.wid._serialized) return;
+
+            const text = `👋 Halo @${user.split('@')[0]}!
+
+Welcome di *${chat.name}* 🎉  
+Semoga betah ya di sini 😆
+
+📌 Jangan lupa baca rules dulu ya biar gak salah langkah 👀
+
+Enjoy! 🚀`;
+
+            await chat.sendMessage(text, {
+                mentions: [user]
+            });
+
+        } catch (err) {
+            console.log('Error welcome:', err);
+        }
+    });
 
 
+    client.on('group_leave', async (notification) => {
+        try {
+            const chat = await notification.getChat();
+            if (!chat.isGroup) return;
 
+            // 🔒 cek apakah bot admin
+            const me = chat.participants.find(p => p.isMe);
+            if (!me || !me.isAdmin) return;
+
+            const user = notification.id.participant || notification.id.remote;
+            if (!user) return;
+            if (user === client.info.wid._serialized) return;
+
+            const text = `😢 Yah, @${user.split('@')[0]} keluar nih...
+
+Makasih udah pernah join di *${chat.name}* 🙏  
+Semoga kita bisa ketemu lagi di lain waktu 👋
+
+Take care ya! ✨`;
+
+            await chat.sendMessage(text, {
+                mentions: [user]
+            });
+
+        } catch (err) {
+            console.log('Error goodbye:', err);
+        }
+    });
+    client.initialize()
+}
+
+startBot()
