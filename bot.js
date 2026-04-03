@@ -527,10 +527,9 @@ simple aja, tinggal pakai 👍`);
     try {
       const chat = await notification.getChat();
       if (!chat.isGroup) return;
-
-      // 🔒 cek apakah bot admin
+      
       const me = chat.participants.find((p) => p.isMe);
-      if (!me || !me.isAdmin) return;
+      // if (!me || !me.isAdmin) return;
 
       const user = notification.id.participant || notification.id.remote;
       if (!user) return;
@@ -558,9 +557,8 @@ Enjoy! 🚀`;
       const chat = await notification.getChat();
       if (!chat.isGroup) return;
 
-      // 🔒 cek apakah bot admin
       const me = chat.participants.find((p) => p.isMe);
-      if (!me || !me.isAdmin) return;
+      // if (!me || !me.isAdmin) return;
 
       const user = notification.id.participant || notification.id.remote;
       if (!user) return;
