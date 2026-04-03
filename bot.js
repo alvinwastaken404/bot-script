@@ -1,11 +1,11 @@
-const { Client, LocalAuth } = require("whatsapp-web.js");
-const express = require("express");
-const QRCode = require("qrcode");
-const waVersion = require("@wppconnect/wa-version");
-const fs = require("fs");
-const path = require("path");
-const { exec } = require("child_process");
-const YTMusic = require("ytmusic-api");
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const express = require('express');
+const QRCode = require('qrcode');
+const waVersion = require('@wppconnect/wa-version');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+const YTMusic = require('ytmusic-api');
 
 const app = express();
 const PORT = 3000;
@@ -15,49 +15,49 @@ let qrCodeData = null;
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    executablePath: "/usr/bin/chromium",
+    executablePath: '/usr/bin/chromium',
     headless: true,
     args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--disable-gpu",
-      "--disable-extensions",
-      "--disable-background-networking",
-      "--disable-sync",
-      "--disable-translate",
-      "--hide-scrollbars",
-      "--mute-audio",
-      "--single-process",
-      "--no-zygote",
-      "--memory-pressure-off",
-      "--metrics-recording-only",
-      "--no-first-run",
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--mute-audio',
+      '--single-process',
+      '--no-zygote',
+      '--memory-pressure-off',
+      '--metrics-recording-only',
+      '--no-first-run'
     ],
   },
   webVersionCache: {
-    type: "remote",
+    type: 'remote',
     remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${waVersion.getLatestVersion()}.html`,
   },
 });
 
 const ytmusic = new YTMusic();
 
-client.on("qr", async (qr) => {
-  console.log("📱 QR Received, open ur browser");
+client.on('qr', async (qr) => {
+  console.log('📱 QR Received, open ur browser');
   qrCodeData = await QRCode.toDataURL(qr);
 });
 
-client.on("ready", () => {
-  console.log("✅ Bot siap!");
+client.on('ready', () => {
+  console.log('✅ Bot siap!');
   qrCodeData = null;
 });
-client.on("authenticated", () => console.log("✅ Login berhasil!"));
-client.on("auth_failure", (msg) => console.error("❌ Auth gagal:", msg));
-client.on("disconnected", (reason) => console.log("⚠️ Disconnect:", reason));
+client.on('authenticated', () => console.log('✅ Login berhasil!'));
+client.on('auth_failure', (msg) => console.error('❌ Auth gagal:', msg));
+client.on('disconnected', (reason) => console.log('⚠️ Disconnect:', reason));
 
-app.get("/", (req, res) => {
+app.get('/', (req, res) => {
   if (qrCodeData) {
     res.send(`
 <!DOCTYPE html>
@@ -190,28 +190,28 @@ let cooldownDB = {
   chat: {},
   command: {},
 };
-if (fs.existsSync("./cooldown.json")) {
-  cooldownDB = JSON.parse(fs.readFileSync("./cooldown.json"));
+if (fs.existsSync('./cooldown.json')) {
+  cooldownDB = JSON.parse(fs.readFileSync('./cooldown.json'));
 }
 function saveCooldown() {
-  fs.writeFileSync("./cooldown.json", JSON.stringify(cooldownDB, null, 2));
+  fs.writeFileSync('./cooldown.json', JSON.stringify(cooldownDB, null, 2));
 }
 function isOnCooldown(type, user, command, duration) {
   const now = Date.now();
 
-  if (type === "command") {
+  if (type === 'command') {
     const last = cooldownDB.command[user]?.[command];
     if (!last) return false;
     return now - last < duration;
   }
 
-  if (type === "user") {
+  if (type === 'user') {
     const last = cooldownDB.user[user];
     if (!last) return false;
     return now - last < duration;
   }
 
-  if (type === "chat") {
+  if (type === 'chat') {
     const last = cooldownDB.chat[user];
     if (!last) return false;
     return now - last < duration;
@@ -220,16 +220,16 @@ function isOnCooldown(type, user, command, duration) {
   return false;
 }
 function setCooldown(type, user, command) {
-  if (type === "command") {
+  if (type === 'command') {
     if (!cooldownDB.command[user]) {
       cooldownDB.command[user] = {};
     }
     cooldownDB.command[user][command] = Date.now();
   }
-  if (type === "user") {
+  if (type === 'user') {
     cooldownDB.user[user] = Date.now();
   }
-  if (type === "chat") {
+  if (type === 'chat') {
     cooldownDB.chat[user] = Date.now();
   }
   saveCooldown();
@@ -239,7 +239,7 @@ function cleanupCooldown() {
 
   for (const type in cooldownDB) {
     for (const user in cooldownDB[type]) {
-      const limit = type === "command" ? COMMAND_COOLDOWN : CHAT_COOLDOWN;
+      const limit = type === 'command' ? COMMAND_COOLDOWN : CHAT_COOLDOWN;
 
       if (now - cooldownDB[type][user] > limit) {
         delete cooldownDB[type][user];
@@ -255,32 +255,32 @@ const CHAT_COOLDOWN = 8 * 60 * 1000;
 const COMMAND_COOLDOWN = 30 * 1000;
 const USER_COOLDOWN = 60 * 1000;
 
-const prefix = "!";
+const prefix = '!';
 
 const getGreeting = () => {
   const hour = new Date().getHours();
-  if (hour >= 4 && hour < 10) return "Selamat pagi 🌅";
-  if (hour >= 10 && hour < 15) return "Selamat siang ☀️";
-  if (hour >= 15 && hour < 18) return "Selamat sore 🌇";
-  return "Selamat malam 🌙";
+  if (hour >= 4 && hour < 10) return 'Selamat pagi 🌅';
+  if (hour >= 10 && hour < 15) return 'Selamat siang ☀️';
+  if (hour >= 15 && hour < 18) return 'Selamat sore 🌇';
+  return 'Selamat malam 🌙';
 };
 
 async function startBot() {
   await ytmusic.initialize();
-  console.log("🎵 YTMusic siap!");
+  console.log('🎵 YTMusic siap!');
 
   // main handler
   async function handleMessage(msg) {
     try {
-      if (msg.from === "status@broadcast") return;
-      if (!msg.body || typeof msg.body !== "string") return;
+      if (msg.from === 'status@broadcast') return;
+      if (!msg.body || typeof msg.body !== 'string') return;
 
-      const text = msg.body || "";
+      const text = msg.body || '';
 
       if (msg.fromMe && !text.startsWith(prefix)) return;
 
       const now = Date.now();
-      const isGroup = msg.from.endsWith("@g.us");
+      const isGroup = msg.from.endsWith('@g.us');
       const sender = msg.author || msg.from;
       const isCommand = text.startsWith(prefix);
 
@@ -307,23 +307,23 @@ async function startBot() {
 
         const isOwner = msg.fromMe;
         if (!isOwner && !isAdmin) {
-          if (isOnCooldown("user", sender, null, USER_COOLDOWN)) {
-            return msg.reply("🚫 Jangan spam ya 😅 tunggu sebentar");
+          if (isOnCooldown('user', sender, null, USER_COOLDOWN)) {
+            return msg.reply('🚫 Jangan spam ya 😅 tunggu sebentar');
           }
           const cooldownTime =
             COMMAND_COOLDOWN[command] || COMMAND_COOLDOWN.default;
 
-          if (isOnCooldown("command", sender, command, cooldownTime)) {
-            return msg.reply("⏳ Command ini masih cooldown");
+          if (isOnCooldown('command', sender, command, cooldownTime)) {
+            return msg.reply('⏳ Command ini masih cooldown');
           }
 
           // set dua-duanya
-          setCooldown("user", sender);
-          setCooldown("command", sender, command);
+          setCooldown('user', sender);
+          setCooldown('command', sender, command);
         }
 
         // menu bot
-        if (command === "help") {
+        if (command === 'help') {
           msg.reply(`Halo 👋
 Ini fitur yang bisa dipakai:
 
@@ -335,29 +335,29 @@ simple aja, tinggal pakai 👍`);
         }
 
         // cmd play
-        if (command === "play") {
-          const query = args.join(" ");
-          if (!query) return msg.reply("Contoh: ```!play judul lagu```");
+        if (command === 'play') {
+          const query = args.join(' ');
+          if (!query) return msg.reply('Contoh: ```!play judul lagu```');
 
           const results = await ytmusic.searchSongs(query);
           const song = results[0];
 
-          if (!song) return msg.reply("❌ Lagu tidak ditemukan");
+          if (!song) return msg.reply('❌ Lagu tidak ditemukan');
 
           function formatDuration(sec) {
-            if (typeof sec === "string") return sec;
+            if (typeof sec === 'string') return sec;
 
             const minutes = Math.floor(sec / 60);
             const seconds = sec % 60;
 
-            return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
           }
 
           const title = song.name;
-          const artist = song.artist?.name || "Unknown";
+          const artist = song.artist?.name || 'Unknown';
           const duration = song.duration
             ? formatDuration(song.duration)
-            : "Unknown";
+            : 'Unknown';
           const videoUrl = `https://www.youtube.com/watch?v=${song.videoId}`;
 
           await msg.reply(`🎶 *NOW PLAYING*
@@ -379,7 +379,7 @@ simple aja, tinggal pakai 👍`);
               exec(fallback, async (err2) => {
                 if (err2) {
                   console.error(err2);
-                  return msg.reply("❌ Gagal download audio");
+                  return msg.reply('❌ Gagal download audio');
                 }
                 setTimeout(sendAudio, 1500);
               });
@@ -389,11 +389,11 @@ simple aja, tinggal pakai 👍`);
             setTimeout(sendAudio, 1500);
           });
 
-          const { MessageMedia } = require("whatsapp-web.js");
+          const { MessageMedia } = require('whatsapp-web.js');
           async function sendAudio() {
             try {
               if (!fs.existsSync(filePath)) {
-                return msg.reply("❌ File audio tidak ditemukan");
+                return msg.reply('❌ File audio tidak ditemukan');
               }
 
               const media = MessageMedia.fromFilePath(filePath);
@@ -401,56 +401,56 @@ simple aja, tinggal pakai 👍`);
 
               await msg.reply(media, undefined, {
                 sendAudioAsVoice: false,
-                mimetype: "audio/mpeg",
+                mimetype: 'audio/mpeg',
               });
 
-              console.log("✅ Audio terkirim");
+              console.log('✅ Audio terkirim');
             } catch (e) {
               console.error(e);
-              msg.reply("❌ Gagal kirim audio");
+              msg.reply('❌ Gagal kirim audio');
             } finally {
               if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
-                console.log("🗑️ File dihapus");
+                console.log('🗑️ File dihapus');
               }
             }
           }
         }
 
         // cmd stiker
-        if (command === "sticker") {
+        if (command === 'sticker') {
           let mediaMsg = msg;
           if (msg.hasQuotedMsg) {
             mediaMsg = await msg.getQuotedMessage();
           }
           if (!mediaMsg.hasMedia) {
-            return msg.reply("Reply / kirim gambarmu dengan ```!sticker```");
+            return msg.reply('Reply / kirim gambarmu dengan ```!sticker```');
           }
 
           try {
             const media = await mediaMsg.downloadMedia();
 
             if (!media) {
-              return msg.reply("❌ Gagal download media");
+              return msg.reply('❌ Gagal download media');
             }
             await msg.reply(media, undefined, {
               sendMediaAsSticker: true,
             });
           } catch (err) {
             console.error(err);
-            msg.reply("❌ Gagal membuat sticker");
+            msg.reply('❌ Gagal membuat sticker');
           }
         }
 
         // cmd download konten
-        if (command === "download") {
+        if (command === 'download') {
           const url = args[0];
 
           if (!url) {
-            return msg.reply("Contoh: ```!download <link>```");
+            return msg.reply('Contoh: ```!download <link>```');
           }
 
-          await msg.reply("⏳ Sedang download...");
+          await msg.reply('⏳ Sedang download...');
 
           const fileId = Date.now();
           const output = path.join(__dirname, `${fileId}.%(ext)s`);
@@ -460,7 +460,7 @@ simple aja, tinggal pakai 👍`);
           exec(cmd, async (err) => {
             if (err) {
               console.error(err);
-              return msg.reply("❌ Gagal download konten");
+              return msg.reply('❌ Gagal download konten');
             }
 
             try {
@@ -470,7 +470,7 @@ simple aja, tinggal pakai 👍`);
               );
 
               if (!fileName) {
-                return msg.reply("❌ File tidak ditemukan");
+                return msg.reply('❌ File tidak ditemukan');
               }
 
               const fullPath = path.join(__dirname, fileName);
@@ -481,25 +481,25 @@ simple aja, tinggal pakai 👍`);
 
               if (stats.size > 16 * 1024 * 1024) {
                 fs.unlinkSync(fullPath);
-                return msg.reply("❌ File terlalu besar (max ±16MB)");
+                return msg.reply('❌ File terlalu besar (max ±16MB)');
               }
 
-              const { MessageMedia } = require("whatsapp-web.js");
+              const { MessageMedia } = require('whatsapp-web.js');
               const media = MessageMedia.fromFilePath(fullPath);
 
               await msg.reply(media, undefined, {
-                caption: "🎬 Berhasil di-download",
+                caption: '🎬 Berhasil di-download',
               });
 
-              console.log("✅ Video terkirim");
+              console.log('✅ Video terkirim');
 
               if (fs.existsSync(fullPath)) {
                 fs.unlinkSync(fullPath);
-                console.log("🗑️ File dihapus");
+                console.log('🗑️ File dihapus');
               }
             } catch (e) {
               console.error(e);
-              msg.reply("❌ Gagal kirim media");
+              msg.reply('❌ Gagal kirim media');
             }
           });
         }
@@ -508,26 +508,26 @@ simple aja, tinggal pakai 👍`);
 
       // auto-reply private
       if (!isCommand && !isGroup && !msg.fromMe) {
-        if (isOnCooldown("chat", sender, CHAT_COOLDOWN)) return;
-        setCooldown("chat", sender);
+        if (isOnCooldown('chat', sender, CHAT_COOLDOWN)) return;
+        setCooldown('chat', sender);
 
         await msg.reply(
           `Halo ${getGreeting()}! \n\nTulis pesanmu dibawah ya...😊`,
         );
       }
     } catch (err) {
-      console.error("❌ Error:", err);
+      console.error('❌ Error:', err);
     }
   }
 
-  client.on("message", handleMessage);
-  client.on("message_create", handleMessage);
+  client.on('message', handleMessage);
+  client.on('message_create', handleMessage);
 
-  client.on("group_join", async (notification) => {
+  client.on('group_join', async (notification) => {
     try {
       const chat = await notification.getChat();
       if (!chat.isGroup) return;
-      
+
       const me = chat.participants.find((p) => p.isMe);
       // if (!me || !me.isAdmin) return;
 
@@ -535,7 +535,7 @@ simple aja, tinggal pakai 👍`);
       if (!user) return;
       if (user === client.info.wid._serialized) return;
 
-      const text = `👋 Halo @${user.split("@")[0]}!
+      const text = `👋 Halo @${user.split('@')[0]}!
 
 Welcome di *${chat.name}* 🎉  
 Semoga betah ya di sini 😆
@@ -548,11 +548,11 @@ Enjoy! 🚀`;
         mentions: [user],
       });
     } catch (err) {
-      console.log("Error welcome:", err);
+      console.log('Error welcome:', err);
     }
   });
 
-  client.on("group_leave", async (notification) => {
+  client.on('group_leave', async (notification) => {
     try {
       const chat = await notification.getChat();
       if (!chat.isGroup) return;
@@ -564,7 +564,7 @@ Enjoy! 🚀`;
       if (!user) return;
       if (user === client.info.wid._serialized) return;
 
-      const text = `😢 Yah, @${user.split("@")[0]} keluar nih...
+      const text = `😢 Yah, @${user.split('@')[0]} keluar nih...
 
 Makasih udah pernah join di *${chat.name}* 🙏  
 Semoga kita bisa ketemu lagi di lain waktu 👋
@@ -575,7 +575,7 @@ Take care ya! ✨`;
         mentions: [user],
       });
     } catch (err) {
-      console.log("Error goodbye:", err);
+      console.log('Error goodbye:', err);
     }
   });
   client.initialize();
